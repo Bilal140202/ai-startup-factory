@@ -1,4 +1,4 @@
-name: Liam — Research & Post
+name: Liam — Research
 
 on:
   workflow_dispatch:
@@ -9,11 +9,13 @@ on:
 jobs:
   research:
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
-    # Only run if state is idle
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -29,34 +31,29 @@ jobs:
           echo "Pipeline state is '${{ steps.state.outputs.state }}' — skipping Liam."
           exit 0
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
 
-      - name: Run Liam
+      - name: Run Liam Research
         env:
-          AI_API_KEY:              ${{ secrets.AI_API_KEY }}
-          NVIDIA_API_KEY:          ${{ secrets.NVIDIA_API_KEY }}
-          GITHUB_TOKEN:            ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_USERNAME:         ${{ secrets.GH_USERNAME }}
-          REDDIT_CLIENT_ID:        ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET:    ${{ secrets.REDDIT_CLIENT_SECRET }}
-          REDDIT_USERNAME:         ${{ secrets.REDDIT_USERNAME }}
-          REDDIT_PASSWORD:         ${{ secrets.REDDIT_PASSWORD }}
-          POSTIZ_API_KEY:          ${{ secrets.POSTIZ_API_KEY }}
-          POSTIZ_BASE_URL:         ${{ secrets.POSTIZ_BASE_URL }}
-          DISCORD_BOT_TOKEN:       ${{ secrets.DISCORD_BOT_TOKEN }}
+          AI_API_KEY:            ${{ secrets.AI_API_KEY }}
+          NVIDIA_API_KEY:        ${{ secrets.NVIDIA_API_KEY }}
+          GITHUB_TOKEN:          ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_USERNAME:       ${{ secrets.GH_USERNAME }}
+          DISCORD_BOT_TOKEN:     ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_APPROVAL_CHANNEL_ID: ${{ secrets.DISCORD_APPROVAL_CHANNEL_ID }}
-          DISCORD_OWNER_USER_ID:   ${{ secrets.DISCORD_OWNER_USER_ID }}
+          DISCORD_OWNER_USER_ID: ${{ secrets.DISCORD_OWNER_USER_ID }}
         run: python agents/liam/scout.py
 
-      - name: Commit
+      - name: Commit research results
         run: |
           git config --global user.name  "Liam Bot"
           git config --global user.email "liam@ai-factory.bot"
-          git add data/ marketing/
+          git add data/
           git diff --cached --quiet || git commit -m "🔍 Liam: research cycle [skip ci]"
           git push
-
