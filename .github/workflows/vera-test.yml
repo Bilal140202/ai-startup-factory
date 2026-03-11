@@ -1,0 +1,21 @@
+name: Vera — Discord Test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Ping Discord
+        env:
+          DISCORD_BOT_TOKEN:           ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_APPROVAL_CHANNEL_ID: ${{ secrets.DISCORD_APPROVAL_CHANNEL_ID }}
+          DISCORD_OWNER_USER_ID:       ${{ secrets.DISCORD_OWNER_USER_ID }}
+        run: python agents/vera/gatekeeper.py
+

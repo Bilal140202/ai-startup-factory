@@ -1,0 +1,62 @@
+name: Liam — Research & Post
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - data/pipeline_state.json
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Only run if state is idle
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check pipeline state
+        id: state
+        run: |
+          STATE=$(cat data/pipeline_state.json | tr -d '"')
+          echo "state=$STATE" >> $GITHUB_OUTPUT
+
+      - name: Skip if not idle
+        if: steps.state.outputs.state != 'idle'
+        run: |
+          echo "Pipeline state is '${{ steps.state.outputs.state }}' — skipping Liam."
+          exit 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run Liam
+        env:
+          AI_API_KEY:              ${{ secrets.AI_API_KEY }}
+          NVIDIA_API_KEY:          ${{ secrets.NVIDIA_API_KEY }}
+          GITHUB_TOKEN:            ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_USERNAME:         ${{ secrets.GITHUB_USERNAME }}
+          REDDIT_CLIENT_ID:        ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET:    ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME:         ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD:         ${{ secrets.REDDIT_PASSWORD }}
+          POSTIZ_API_KEY:          ${{ secrets.POSTIZ_API_KEY }}
+          POSTIZ_BASE_URL:         ${{ secrets.POSTIZ_BASE_URL }}
+          DISCORD_BOT_TOKEN:       ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_APPROVAL_CHANNEL_ID: ${{ secrets.DISCORD_APPROVAL_CHANNEL_ID }}
+          DISCORD_OWNER_USER_ID:   ${{ secrets.DISCORD_OWNER_USER_ID }}
+        run: python agents/liam/scout.py
+
+      - name: Commit
+        run: |
+          git config --global user.name  "Liam Bot"
+          git config --global user.email "liam@ai-factory.bot"
+          git add data/ marketing/
+          git diff --cached --quiet || git commit -m "🔍 Liam: research cycle [skip ci]"
+          git push
+

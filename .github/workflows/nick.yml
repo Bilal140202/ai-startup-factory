@@ -1,0 +1,43 @@
+name: Nick — Content Creator
+
+on:
+  push:
+    paths:
+      - data/app_database.json
+  workflow_dispatch:
+
+jobs:
+  content:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install -r requirements.txt
+
+      - name: Run Nick
+        env:
+          AI_API_KEY:          ${{ secrets.AI_API_KEY }}
+          NVIDIA_API_KEY:      ${{ secrets.NVIDIA_API_KEY }}
+          GITHUB_USERNAME:     ${{ secrets.GITHUB_USERNAME }}
+          FACTORY_REPO_NAME:   ${{ secrets.FACTORY_REPO_NAME }}
+          DISCORD_BOT_TOKEN:   ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_APPROVAL_CHANNEL_ID: ${{ secrets.DISCORD_APPROVAL_CHANNEL_ID }}
+          DISCORD_OWNER_USER_ID:       ${{ secrets.DISCORD_OWNER_USER_ID }}
+        run: python agents/nick/marketer.py
+
+      - name: Commit
+        run: |
+          git config --global user.name  "Nick Bot"
+          git config --global user.email "nick@ai-factory.bot"
+          git add marketing/ data/
+          git diff --cached --quiet || git commit -m "✍️ Nick: content ready [skip ci]"
+          git push
+
