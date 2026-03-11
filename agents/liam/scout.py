@@ -1,7 +1,15 @@
 """
-Liam: Market research + idea discovery + validation.
-Scrapes Reddit, HackerNews, and GitHub Issues.
-No Reddit API. No posting.
+Liam — Market Research Agent
+
+Sources scanned:
+• Reddit posts
+• Reddit comments (primary)
+• HackerNews Ask HN
+• GitHub Issues feature requests
+
+Outputs:
+• best validated idea → Vera approval
+• problems.json update
 """
 
 import sys
@@ -15,62 +23,79 @@ from shared import ai
 GH_TOKEN = os.environ["GITHUB_TOKEN"]
 GH_USER  = os.environ["GITHUB_USERNAME"]
 
-HEADERS = {"User-Agent": "ai-startup-factory-liam/5.0"}
+HEADERS = {"User-Agent": "ai-startup-factory-liam/6.0"}
+
 
 SUBREDDITS = [
-    "SideProject","Entrepreneur","startups","webdev",
-    "SaaS","productivity","automation","nocode",
-    "MachineLearning","artificial","ChatGPT"
+"SideProject","Entrepreneur","startups","webdev",
+"SaaS","productivity","automation","nocode",
+"MachineLearning","artificial","ChatGPT"
 ]
+
 
 KEYWORDS = [
-    "tool","automate","looking for","need a",
-    "is there a way","app that","wish there was",
-    "anyone built","why isn't there","can someone make",
-    "would pay for","anyone know a","feature request"
+"tool","automate","looking for","need a",
+"is there a way","app that","wish there was",
+"anyone built","why isn't there","can someone make",
+"would pay for","anyone know a","feature request",
+"how do i","best way to","any tool","any website",
+"any app","recommend tool","help with",
+"convert","generate","extract","scrape"
 ]
 
 
-# ─────────────────────────────────────────
+# ------------------------------------------------
 # File helpers
-# ─────────────────────────────────────────
+# ------------------------------------------------
 
 def load(path):
+
     if not os.path.exists(path):
         return []
+
     with open(path) as f:
         return json.load(f)
+
 
 def load_one(path, default=None):
+
     if not os.path.exists(path):
         return default
+
     with open(path) as f:
         return json.load(f)
 
+
 def save(path, data):
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+
+    with open(path,"w") as f:
+        json.dump(data,f,indent=2)
+
 
 def set_state(s):
+
     save("data/pipeline_state.json", s)
 
+
 def get_state():
-    return load_one("data/pipeline_state.json", "idle")
+
+    return load_one("data/pipeline_state.json","idle")
 
 
-# ─────────────────────────────────────────
+# ------------------------------------------------
 # Repo detection
-# ─────────────────────────────────────────
+# ------------------------------------------------
 
 def fetch_my_repos():
 
-    repos, page = [], 1
+    repos = []
+    page = 1
 
     while True:
 
         r = requests.get(
-            f"https://api.github.com/users/{GH_USER}/repos?per_page=100&page={page}",
-            headers={"Authorization": f"token {GH_TOKEN}"}
+        f"https://api.github.com/users/{GH_USER}/repos?per_page=100&page={page}",
+        headers={"Authorization": f"token {GH_TOKEN}"}
         )
 
         data = r.json()
@@ -91,7 +116,7 @@ def fetch_my_repos():
 def find_existing_tool(problem_text, repos):
 
     repo_list = "\n".join(
-        [f"- {r['name']}: {r.get('description','')}" for r in repos[:80]]
+    [f"- {r['name']}: {r.get('description','')}" for r in repos[:80]]
     )
 
     prompt = f"""
@@ -106,7 +131,7 @@ Problem:
 Does any repo already solve this?
 
 Return JSON:
-{{"match": true/false, "repo_name": "<name>", "repo_url": "<url>"}}
+{{"match":true/false,"repo_name":"name","repo_url":"url"}}
 """
 
     try:
@@ -123,26 +148,24 @@ Return JSON:
     except:
         pass
 
-    return None, None
+    return None,None
 
 
-# ─────────────────────────────────────────
-# Reddit scraping
-# ─────────────────────────────────────────
+# ------------------------------------------------
+# Reddit post scanning
+# ------------------------------------------------
 
-def scrape_reddit():
+def scrape_reddit_posts():
 
     ideas = []
 
     for sub in SUBREDDITS:
 
-        print("Scanning r/" + sub)
-
         try:
 
             url = f"https://www.reddit.com/r/{sub}/top.json?t=week&limit=50"
 
-            r = requests.get(url, headers=HEADERS)
+            r = requests.get(url,headers=HEADERS)
 
             posts = r.json()["data"]["children"]
 
@@ -156,26 +179,71 @@ def scrape_reddit():
                     continue
 
                 ideas.append({
-                    "title": d["title"],
-                    "text": (d.get("selftext") or "")[:500],
-                    "url": "https://reddit.com" + d["permalink"],
-                    "score": d["ups"] + d["num_comments"],
-                    "sub": sub,
-                    "source": "reddit"
+
+                "title": d["title"],
+                "text": text[:500],
+                "url": "https://reddit.com"+d["permalink"],
+                "score": d["ups"] + d["num_comments"],
+                "sub": sub,
+                "source":"reddit-post"
+
                 })
 
             time.sleep(1)
 
         except Exception as e:
 
-            print("reddit scrape error:", e)
+            print("reddit post error:",e)
 
     return ideas
 
 
-# ─────────────────────────────────────────
-# HackerNews scraping
-# ─────────────────────────────────────────
+# ------------------------------------------------
+# Reddit comment mining (primary discovery)
+# ------------------------------------------------
+
+def scrape_reddit_comments():
+
+    ideas = []
+
+    try:
+
+        url = "https://www.reddit.com/r/all/comments.json?limit=200"
+
+        r = requests.get(url,headers=HEADERS)
+
+        comments = r.json()["data"]["children"]
+
+        for c in comments:
+
+            d = c["data"]
+
+            text = d["body"]
+
+            if not detect_problem(text):
+                continue
+
+            ideas.append({
+
+            "title": text[:120],
+            "text": text[:500],
+            "url": "https://reddit.com"+d["permalink"],
+            "score": d["score"],
+            "sub": d["subreddit"],
+            "source":"reddit-comment"
+
+            })
+
+    except Exception as e:
+
+        print("reddit comment error:",e)
+
+    return ideas
+
+
+# ------------------------------------------------
+# HackerNews
+# ------------------------------------------------
 
 def scrape_hackernews():
 
@@ -184,11 +252,11 @@ def scrape_hackernews():
     try:
 
         html = requests.get(
-            "https://news.ycombinator.com/ask",
-            headers=HEADERS
+        "https://news.ycombinator.com/ask",
+        headers=HEADERS
         ).text
 
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html,"html.parser")
 
         rows = soup.select(".athing")
 
@@ -205,35 +273,37 @@ def scrape_hackernews():
                 continue
 
             ideas.append({
-                "title": title,
-                "text": "",
-                "url": title_el["href"],
-                "score": 0,
-                "sub": "ask-hn",
-                "source": "hackernews"
+
+            "title":title,
+            "text":"",
+            "url":title_el["href"],
+            "score":0,
+            "sub":"ask-hn",
+            "source":"hackernews"
+
             })
 
     except Exception as e:
 
-        print("hn scrape error:", e)
+        print("hn error:",e)
 
     return ideas
 
 
-# ─────────────────────────────────────────
-# GitHub Issues scraping
-# ─────────────────────────────────────────
+# ------------------------------------------------
+# GitHub Issues
+# ------------------------------------------------
 
 def scrape_github_issues():
 
     ideas = []
 
     queries = [
-        "looking for tool",
-        "feature request",
-        "is there a way",
-        "any tool that",
-        "wish there was"
+    "feature request",
+    "looking for tool",
+    "wish there was",
+    "any tool that",
+    "is there a way"
     ]
 
     for q in queries:
@@ -242,9 +312,9 @@ def scrape_github_issues():
 
             url = f"https://github.com/search?q={q.replace(' ','+')}&type=issues"
 
-            html = requests.get(url, headers=HEADERS).text
+            html = requests.get(url,headers=HEADERS).text
 
-            soup = BeautifulSoup(html, "html.parser")
+            soup = BeautifulSoup(html,"html.parser")
 
             issues = soup.select(".issue-list-item")
 
@@ -261,24 +331,26 @@ def scrape_github_issues():
                     continue
 
                 ideas.append({
-                    "title": title,
-                    "text": "",
-                    "url": "https://github.com" + title_el["href"],
-                    "score": 0,
-                    "sub": "github-issues",
-                    "source": "github"
+
+                "title":title,
+                "text":"",
+                "url":"https://github.com"+title_el["href"],
+                "score":0,
+                "sub":"github-issues",
+                "source":"github"
+
                 })
 
         except Exception as e:
 
-            print("github issue scrape error:", e)
+            print("github issue error:",e)
 
     return ideas
 
 
-# ─────────────────────────────────────────
+# ------------------------------------------------
 # Detection
-# ─────────────────────────────────────────
+# ------------------------------------------------
 
 def detect_problem(text):
 
@@ -290,48 +362,51 @@ def detect_problem(text):
 def already_in_pipeline(title):
 
     for p in load("data/problems.json"):
+
         if title.lower() in p["title"].lower():
             return True
 
     for p in load("data/app_database.json"):
+
         if title.lower() in p.get("idea","").lower():
             return True
 
     for p in load("data/research_cache.json"):
+
         if title.lower() in p.get("title","").lower():
             return True
 
     return False
 
 
-# ─────────────────────────────────────────
+# ------------------------------------------------
 # GitHub saturation
-# ─────────────────────────────────────────
+# ------------------------------------------------
 
 def github_saturated(query):
 
     try:
 
         r = requests.get(
-            f"https://api.github.com/search/repositories?q={query}",
-            headers={"Authorization": f"token {GH_TOKEN}"}
+        f"https://api.github.com/search/repositories?q={query}",
+        headers={"Authorization":f"token {GH_TOKEN}"}
         )
 
-        return r.json().get("total_count", 0) > 30
+        return r.json().get("total_count",0) > 30
 
     except:
 
         return False
 
 
-# ─────────────────────────────────────────
+# ------------------------------------------------
 # GitHub reference repos
-# ─────────────────────────────────────────
+# ------------------------------------------------
 
 def find_github_codebase(problem_text):
 
     prompt = f"""
-Generate two GitHub search queries for open-source tools solving this problem:
+Generate two GitHub search queries for open-source tools solving this:
 
 {problem_text[:300]}
 
@@ -341,11 +416,11 @@ Return JSON:
 
     try:
 
-        raw = ai(prompt, model_hint="fast")
+        raw = ai(prompt,model_hint="fast")
 
         raw = re.sub(r"```[a-z]*\n?","",raw).replace("```","").strip()
 
-        queries = json.loads(raw).get("queries", [])
+        queries = json.loads(raw).get("queries",[])
 
     except:
 
@@ -358,16 +433,18 @@ Return JSON:
         try:
 
             r = requests.get(
-                f"https://api.github.com/search/repositories?q={q}&sort=stars&order=desc&per_page=3",
-                headers={"Authorization": f"token {GH_TOKEN}"}
+            f"https://api.github.com/search/repositories?q={q}&sort=stars&order=desc&per_page=3",
+            headers={"Authorization":f"token {GH_TOKEN}"}
             )
 
-            for repo in r.json().get("items", []):
+            for repo in r.json().get("items",[]):
 
                 refs.append({
-                    "repo_url": repo["html_url"],
-                    "description": repo.get("description",""),
-                    "stars": repo["stargazers_count"]
+
+                "repo_url":repo["html_url"],
+                "description":repo.get("description",""),
+                "stars":repo["stargazers_count"]
+
                 })
 
         except:
@@ -376,25 +453,25 @@ Return JSON:
     return refs[:5]
 
 
-# ─────────────────────────────────────────
-# AI idea validation
-# ─────────────────────────────────────────
+# ------------------------------------------------
+# AI validation
+# ------------------------------------------------
 
-def validate_idea(title, text):
+def validate_idea(title,text):
 
     prompt = f"""
-Evaluate this as a micro SaaS idea.
+Evaluate this SaaS idea.
 
 Title: {title}
 Context: {text[:500]}
 
-Return JSON only:
+Return JSON:
 
 {{
 "score":1-10,
 "validated":true/false,
 "product_type":"html-tool|python-webapp|react-app",
-"product_name":"slug-name",
+"product_name":"slug",
 "elevator_pitch":"one sentence",
 "target_user":"who"
 }}
@@ -402,7 +479,7 @@ Return JSON only:
 
     try:
 
-        raw = ai(prompt, model_hint="fast")
+        raw = ai(prompt,model_hint="fast")
 
         raw = re.sub(r"```[a-z]*\n?","",raw).replace("```","").strip()
 
@@ -413,9 +490,9 @@ Return JSON only:
         return None
 
 
-# ─────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────
+# ------------------------------------------------
+# MAIN
+# ------------------------------------------------
 
 def run():
 
@@ -423,75 +500,68 @@ def run():
 
     state = get_state()
 
-    print("Liam starting, state:", state)
+    print("Liam starting:",state)
 
     if state != "idle":
-
-        print("Pipeline busy")
-
         return
 
 
     print("Fetching repos")
 
-    my_repos = fetch_my_repos()
+    repos = fetch_my_repos()
 
 
-    reddit = scrape_reddit()
+    ideas = []
 
-    hn = scrape_hackernews()
+    ideas += scrape_reddit_posts()
 
-    github = scrape_github_issues()
+    ideas += scrape_reddit_comments()
+
+    ideas += scrape_hackernews()
+
+    ideas += scrape_github_issues()
 
 
-    raw_ideas = reddit + hn + github
-
-
-    raw_ideas = sorted(raw_ideas, key=lambda x: x["score"], reverse=True)[:20]
+    ideas = sorted(ideas,key=lambda x:x["score"],reverse=True)[:40]
 
 
     best = None
 
 
-    for idea in raw_ideas:
+    for idea in ideas:
 
         if already_in_pipeline(idea["title"]):
-            continue
-
-        existing_url, existing_name = find_existing_tool(
-            idea["title"], my_repos
-        )
-
-        if existing_url:
             continue
 
         if github_saturated(idea["title"]):
             continue
 
+        existing_url,_ = find_existing_tool(idea["title"],repos)
 
-        result = validate_idea(idea["title"], idea["text"])
+        if existing_url:
+            continue
 
+        result = validate_idea(idea["title"],idea["text"])
 
         if result and result.get("validated"):
 
             refs = find_github_codebase(idea["title"])
 
-
             best = {
 
-                "title": idea["title"],
-                "idea": idea["title"],
-                "url": idea["url"],
-                "score": idea["score"],
-                "sub": idea["sub"],
-                "ai_score": result["score"],
-                "product_type": result["product_type"],
-                "product_name": result["product_name"],
-                "elevator_pitch": result["elevator_pitch"],
-                "target_user": result["target_user"],
-                "github_refs": refs,
-                "status": "pending",
-                "created": str(datetime.datetime.utcnow())
+            "title":idea["title"],
+            "idea":idea["title"],
+            "url":idea["url"],
+            "score":idea["score"],
+            "sub":idea["sub"],
+            "ai_score":result["score"],
+            "product_type":result["product_type"],
+            "product_name":result["product_name"],
+            "elevator_pitch":result["elevator_pitch"],
+            "target_user":result["target_user"],
+            "github_refs":refs,
+            "status":"pending",
+            "created":str(datetime.datetime.utcnow())
 
             }
 
@@ -500,17 +570,11 @@ def run():
 
     if not best:
 
-        print("No good ideas")
-
-        send_confirmation("Liam ran but found no strong ideas.")
-
+        send_confirmation("Factory update: Liam ran but found no strong ideas.")
         return
 
 
-    print("Best idea:", best["product_name"])
-
-
-    msg_id, approved = request_liam_approval(best)
+    msg_id,approved = request_liam_approval(best)
 
 
     if approved:
@@ -519,33 +583,17 @@ def run():
 
         problems.append(best)
 
-        save("data/problems.json", problems)
-
-
-        cache = load("data/research_cache.json")
-
-        cache.append({
-
-            "title": best["title"],
-            "cached_at": str(datetime.datetime.utcnow())
-
-        })
-
-        save("data/research_cache.json", cache[-200:])
-
+        save("data/problems.json",problems)
 
         set_state("idle")
 
-        print("Idea saved, Kyle will trigger")
-
+        print("Idea approved → Kyle will start")
 
     else:
 
-        print("Idea rejected")
-
         set_state("idle")
 
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     run()
