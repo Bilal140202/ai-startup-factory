@@ -40,7 +40,7 @@ jobs:
           AI_API_KEY:              ${{ secrets.AI_API_KEY }}
           NVIDIA_API_KEY:          ${{ secrets.NVIDIA_API_KEY }}
           GITHUB_TOKEN:            ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_USERNAME:         ${{ secrets.GITHUB_USERNAME }}
+          GITHUB_USERNAME:         ${{ secrets.GH_USERNAME }}
           REDDIT_CLIENT_ID:        ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET:    ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USERNAME:         ${{ secrets.REDDIT_USERNAME }}
