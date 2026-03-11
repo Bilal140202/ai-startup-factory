@@ -29,7 +29,7 @@ jobs:
           AI_API_KEY:          ${{ secrets.AI_API_KEY }}
           NVIDIA_API_KEY:      ${{ secrets.NVIDIA_API_KEY }}
           GITHUB_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_USERNAME:     ${{ secrets.GITHUB_USERNAME }}
+          GITHUB_USERNAME:     ${{ secrets.GH_USERNAME }}
           NETLIFY_AUTH_TOKEN:  ${{ secrets.NETLIFY_AUTH_TOKEN }}
           DISCORD_BOT_TOKEN:   ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_APPROVAL_CHANNEL_ID: ${{ secrets.DISCORD_APPROVAL_CHANNEL_ID }}
