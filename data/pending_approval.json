@@ -1,1 +1,42 @@
-{}
+{
+  "stage": "liam",
+  "idea": {
+    "title": "For the C++ codebase though, in the rare cases when I need to change something there, it's pretty much business as usual; I won't trust the code it generates, a",
+    "idea": "Developers struggle with trusting generated code in C++ codebases, leading to manual rewriting and increased mental load.",
+    "url": "https://news.ycombinator.com/item?id=47388646",
+    "score": 0,
+    "signal_score": 13,
+    "sub": "hn-comments",
+    "ai_score": 6,
+    "product_type": "developer-tool",
+    "product_name": "cpp-code-assistant",
+    "elevator_pitch": "A C++ code assistant that generates trustworthy code, reducing manual rewriting and mental load for developers.",
+    "target_user": "C++ developers and development teams",
+    "why_now": "As C++ codebases continue to grow in complexity, the need for reliable code generation tools is becoming increasingly important.",
+    "github_refs": [
+      {
+        "repo_url": "https://github.com/dotnet/llilc",
+        "full_name": "dotnet/llilc",
+        "default_branch": "main",
+        "description": "This repo contains LLILC, an LLVM based compiler for .NET Core. It includes a set of cross-platform .NET code generation tools that enables compilation of MSIL byte code to LLVM supported platforms.",
+        "stars": 1518
+      },
+      {
+        "repo_url": "https://github.com/flexferrum/autoprogrammer",
+        "full_name": "flexferrum/autoprogrammer",
+        "default_branch": "master",
+        "description": "C++ to C++ code generation tool (enum2string conversion, serialization, reflection etc.)",
+        "stars": 97
+      },
+      {
+        "repo_url": "https://github.com/baszalmstra/header-parser",
+        "full_name": "baszalmstra/header-parser",
+        "default_branch": "master",
+        "description": "Extracts information from an annotated C++ header and outputs it as JSON for use in code generation tools.",
+        "stars": 90
+      }
+    ],
+    "status": "pending",
+    "created": "2026-03-23 07:55:17.045581"
+  }
+}
