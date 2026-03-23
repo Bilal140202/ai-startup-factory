@@ -2,7 +2,7 @@
 Shared AI caller: tries ezif.in first, falls back to NVIDIA NIM.
 All keys pulled from environment (GitHub secrets).
 """
-import os, requests, time
+import json, os, re, requests, time
 
 EZIF_KEY    = os.environ.get("AI_API_KEY", "")
 EZIF_URL    = "https://ai.ezif.in/v1/chat/completions"
@@ -64,4 +64,25 @@ def ai(prompt, system="You are a helpful AI assistant.", model_hint="fast", max_
             raise RuntimeError(f"Both AI providers failed. NVIDIA error: {e}")
 
     raise RuntimeError("No AI API keys configured.")
+
+
+def extract_json(raw):
+    """
+    Parse JSON from a model response that may include fences or surrounding text.
+    """
+    if raw is None:
+        raise ValueError("No model output to parse.")
+
+    text = re.sub(r"```[a-zA-Z0-9_-]*\n?", "", raw).replace("```", "").strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}|\[.*\]", text, re.DOTALL)
+    if match:
+        return json.loads(match.group(0))
+
+    raise ValueError("Model output did not contain valid JSON.")
 

@@ -21,6 +21,7 @@ jobs:
           python-version: "3.11"
 
       - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -p "test_*.py"
       - name: Install Netlify CLI
         run: npm install -g netlify-cli
 

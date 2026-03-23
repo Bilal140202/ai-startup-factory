@@ -17,7 +17,7 @@ sys.path.insert(0, "agents")
 
 import requests, json, os, time, datetime, re
 from bs4 import BeautifulSoup
-from shared import ai
+from shared import ai, extract_json
 
 
 GH_TOKEN = os.environ["GITHUB_TOKEN"]
@@ -41,6 +41,35 @@ KEYWORDS = [
 "how do i","best way to","any tool","any website",
 "any app","recommend tool","help with",
 "convert","generate","extract","scrape"
+]
+
+PAIN_PATTERNS = [
+"looking for","need a","need an","need help","is there a way",
+"wish there was","would pay for","feature request","can someone make",
+"how do i","best way to","any tool","any website","any app",
+"recommend tool","help with","struggling to","takes forever",
+"manual process","time consuming","frustrated","pain point",
+"annoying to","tired of","keep doing this manually"
+]
+
+BUYER_PATTERNS = [
+"would pay","paid","paying","team","client","customers",
+"workflow","business","agency","sales","support","ops",
+"operations","marketing","finance","recruiting","hr"
+]
+
+NEGATIVE_PATTERNS = [
+"show hn","roast my","i built","i made","launching",
+"just shipped","promo","promotion","subscribe","newsletter",
+"hiring","job","meme","shitpost","joke","github repo",
+"open source release","free credits","discount"
+]
+
+TOOL_CONTEXT = [
+"workflow","process","dashboard","automation","data","report",
+"lead","email","invoice","calendar","crm","document","pdf",
+"spreadsheet","customer","content","scrape","extract","generate",
+"convert","analyze","summarize","transcribe","integrate"
 ]
 
 
@@ -80,6 +109,32 @@ def set_state(s):
 def get_state():
 
     return load_one("data/pipeline_state.json","idle")
+
+
+def clean_text(text):
+
+    text = re.sub(r"\s+"," ", (text or "").strip())
+    text = re.sub(r"https?://\S+","", text)
+    text = re.sub(r"/u/\w+","", text, flags=re.I)
+    text = text.replace("&amp;","&")
+
+    return text.strip(" -|:\n\t")
+
+
+def sentence_split(text):
+
+    chunks = re.split(r"(?<=[\.\?\!])\s+|\n+", clean_text(text))
+    return [c.strip() for c in chunks if c and len(c.strip()) >= 20]
+
+
+def canonicalize(text):
+
+    text = clean_text(text).lower()
+    text = re.sub(r"[^a-z0-9\s]"," ", text)
+    text = re.sub(r"\b(a|an|the|to|for|with|and|or|of|in|on|my|our|your)\b"," ", text)
+    text = re.sub(r"\s+"," ", text).strip()
+
+    return text
 
 
 # ------------------------------------------------
@@ -137,10 +192,7 @@ Return JSON:
     try:
 
         raw = ai(prompt, model_hint="fast")
-
-        raw = re.sub(r"```[a-z]*\n?","",raw).replace("```","").strip()
-
-        data = json.loads(raw)
+        data = extract_json(raw)
 
         if data.get("match"):
             return data.get("repo_url"), data.get("repo_name")
@@ -149,6 +201,112 @@ Return JSON:
         pass
 
     return None,None
+
+
+def score_problem_signal(text, source=""):
+
+    text = clean_text(text)
+    low = text.lower()
+    score = 0
+    reasons = []
+
+    if len(low) >= 35:
+        score += 1
+    else:
+        score -= 2
+        reasons.append("too_short")
+
+    if any(k in low for k in KEYWORDS):
+        score += 2
+        reasons.append("keyword")
+
+    if any(k in low for k in PAIN_PATTERNS):
+        score += 4
+        reasons.append("pain")
+
+    if any(k in low for k in BUYER_PATTERNS):
+        score += 2
+        reasons.append("buyer")
+
+    if any(k in low for k in TOOL_CONTEXT):
+        score += 2
+        reasons.append("tool_context")
+
+    if "?" in text:
+        score += 1
+
+    if source == "reddit-comment":
+        score += 1
+
+    if re.search(r"\b(i|we)\s+(need|want|wish|keep|spend|waste|hate|struggle)\b", low):
+        score += 2
+        reasons.append("first_person_pain")
+
+    if re.search(r"\b(build|buy|use|pay|replace|automate|track|extract|generate)\b", low):
+        score += 1
+
+    if any(k in low for k in NEGATIVE_PATTERNS):
+        score -= 5
+        reasons.append("noise")
+
+    if len(low) > 600:
+        score -= 1
+
+    return score, reasons
+
+
+def extract_problem_statement(title, text, source):
+
+    candidates = []
+
+    for item in [title, text]:
+        for sentence in sentence_split(item):
+            signal, _ = score_problem_signal(sentence, source)
+            if signal >= 3:
+                candidates.append((signal, sentence))
+
+    if not candidates:
+        merged = clean_text(f"{title}. {text}")
+        return merged[:160], merged[:500]
+
+    candidates.sort(key=lambda x: (-x[0], len(x[1])))
+    best_sentence = candidates[0][1]
+    context_parts = []
+
+    for _, sentence in candidates[:3]:
+        if sentence not in context_parts:
+            context_parts.append(sentence)
+
+    summary = clean_text(" ".join(context_parts))[:500]
+    short_title = clean_text(best_sentence)[:160]
+
+    return short_title, summary
+
+
+def build_candidate(title, text, url, score, sub, source):
+
+    title = clean_text(title)
+    text = clean_text(text)
+    extracted_title, extracted_text = extract_problem_statement(title, text, source)
+    combined = clean_text(f"{title}. {text}")
+    signal_score, reasons = score_problem_signal(combined, source)
+
+    if signal_score < 4:
+        return None
+
+    return {
+    "title": extracted_title,
+    "text": extracted_text,
+    "raw_title": title,
+    "raw_text": text[:500],
+    "url": url,
+    "score": score,
+    "signal_score": signal_score,
+    "signal_reasons": reasons,
+    "rank_score": (signal_score * 100) + max(score, 0),
+    "sub": sub,
+    "source": source
+    }
 
 
 # ------------------------------------------------
@@ -174,20 +332,17 @@ def scrape_reddit_posts():
                 d = p["data"]
 
                 text = d["title"] + " " + (d.get("selftext") or "")
+                candidate = build_candidate(
+                d["title"],
+                text,
+                "https://reddit.com"+d["permalink"],
+                d["ups"] + d["num_comments"],
+                sub,
+                "reddit-post"
+                )
 
-                if not detect_problem(text):
-                    continue
-
-                ideas.append({
-
-                "title": d["title"],
-                "text": text[:500],
-                "url": "https://reddit.com"+d["permalink"],
-                "score": d["ups"] + d["num_comments"],
-                "sub": sub,
-                "source":"reddit-post"
-
-                })
+                if candidate:
+                    ideas.append(candidate)
 
             time.sleep(1)
 
@@ -219,20 +374,17 @@ def scrape_reddit_comments():
             d = c["data"]
 
             text = d["body"]
+            candidate = build_candidate(
+            text[:160],
+            text,
+            "https://reddit.com"+d["permalink"],
+            d["score"],
+            d["subreddit"],
+            "reddit-comment"
+            )
 
-            if not detect_problem(text):
-                continue
-
-            ideas.append({
-
-            "title": text[:120],
-            "text": text[:500],
-            "url": "https://reddit.com"+d["permalink"],
-            "score": d["score"],
-            "sub": d["subreddit"],
-            "source":"reddit-comment"
-
-            })
+            if candidate:
+                ideas.append(candidate)
 
     except Exception as e:
 
@@ -268,20 +420,17 @@ def scrape_hackernews():
                 continue
 
             title = title_el.text
+            candidate = build_candidate(
+            title,
+            "",
+            title_el["href"],
+            0,
+            "ask-hn",
+            "hackernews"
+            )
 
-            if not detect_problem(title):
-                continue
-
-            ideas.append({
-
-            "title":title,
-            "text":"",
-            "url":title_el["href"],
-            "score":0,
-            "sub":"ask-hn",
-            "source":"hackernews"
-
-            })
+            if candidate:
+                ideas.append(candidate)
 
     except Exception as e:
 
@@ -326,20 +475,17 @@ def scrape_github_issues():
                     continue
 
                 title = title_el.text.strip()
+                candidate = build_candidate(
+                title,
+                "",
+                "https://github.com"+title_el["href"],
+                0,
+                "github-issues",
+                "github"
+                )
 
-                if not detect_problem(title):
-                    continue
-
-                ideas.append({
-
-                "title":title,
-                "text":"",
-                "url":"https://github.com"+title_el["href"],
-                "score":0,
-                "sub":"github-issues",
-                "source":"github"
-
-                })
+                if candidate:
+                    ideas.append(candidate)
 
         except Exception as e:
 
@@ -354,26 +500,29 @@ def scrape_github_issues():
 
 def detect_problem(text):
 
-    text = text.lower()
-
-    return any(k in text for k in KEYWORDS)
+    score, _ = score_problem_signal(text)
+    return score >= 4
 
 
 def already_in_pipeline(title):
 
+    title_key = canonicalize(title)
+
     for p in load("data/problems.json"):
 
-        if title.lower() in p["title"].lower():
+        if title_key and (title_key in canonicalize(p.get("title","")) or canonicalize(p.get("title","")) in title_key):
             return True
 
     for p in load("data/app_database.json"):
 
-        if title.lower() in p.get("idea","").lower():
+        idea_key = canonicalize(p.get("idea",""))
+        if title_key and (title_key in idea_key or idea_key in title_key):
             return True
 
     for p in load("data/research_cache.json"):
 
-        if title.lower() in p.get("title","").lower():
+        cache_key = canonicalize(p.get("title",""))
+        if title_key and (title_key in cache_key or cache_key in title_key):
             return True
 
     return False
@@ -417,10 +566,7 @@ Return JSON:
     try:
 
         raw = ai(prompt,model_hint="fast")
-
-        raw = re.sub(r"```[a-z]*\n?","",raw).replace("```","").strip()
-
-        queries = json.loads(raw).get("queries",[])
+        queries = extract_json(raw).get("queries",[])
 
     except:
 
@@ -442,6 +588,8 @@ Return JSON:
                 refs.append({
 
                 "repo_url":repo["html_url"],
+                "full_name":repo["full_name"],
+                "default_branch":repo.get("default_branch","main"),
                 "description":repo.get("description",""),
                 "stars":repo["stargazers_count"]
 
@@ -460,7 +608,10 @@ Return JSON:
 def validate_idea(title,text):
 
     prompt = f"""
-Evaluate this SaaS idea.
+You are validating startup opportunities from scraped internet discussions.
+Reject vague chatter, memes, personal one-off problems, and requests that do not imply a reusable product.
+
+Evaluate this candidate.
 
 Title: {title}
 Context: {text[:500]}
@@ -470,20 +621,19 @@ Return JSON:
 {{
 "score":1-10,
 "validated":true/false,
+"problem_summary":"one sentence",
 "product_type":"html-tool|python-webapp|react-app",
 "product_name":"slug",
 "elevator_pitch":"one sentence",
-"target_user":"who"
+"target_user":"who",
+"why_now":"short reason"
 }}
 """
 
     try:
 
         raw = ai(prompt,model_hint="fast")
-
-        raw = re.sub(r"```[a-z]*\n?","",raw).replace("```","").strip()
-
-        return json.loads(raw)
+        return extract_json(raw)
 
     except:
 
@@ -522,10 +672,25 @@ def run():
     ideas += scrape_github_issues()
 
 
-    ideas = sorted(ideas,key=lambda x:x["score"],reverse=True)[:40]
+    unique = {}
+
+    for idea in ideas:
+
+        key = canonicalize(idea["title"])
+
+        if not key:
+            continue
+
+        current = unique.get(key)
+
+        if not current or idea["rank_score"] > current["rank_score"]:
+            unique[key] = idea
+
+    ideas = sorted(unique.values(), key=lambda x: x["rank_score"], reverse=True)[:25]
 
 
     best = None
+    best_total = -1
 
 
     for idea in ideas:
@@ -546,26 +711,31 @@ def run():
         if result and result.get("validated"):
 
             refs = find_github_codebase(idea["title"])
+            total_score = (idea["signal_score"] * 2) + int(result.get("score", 0))
 
-            best = {
+            candidate = {
 
             "title":idea["title"],
-            "idea":idea["title"],
+            "idea":result.get("problem_summary") or idea["title"],
             "url":idea["url"],
             "score":idea["score"],
+            "signal_score":idea["signal_score"],
             "sub":idea["sub"],
             "ai_score":result["score"],
             "product_type":result["product_type"],
             "product_name":result["product_name"],
             "elevator_pitch":result["elevator_pitch"],
             "target_user":result["target_user"],
+            "why_now":result.get("why_now",""),
             "github_refs":refs,
             "status":"pending",
             "created":str(datetime.datetime.utcnow())
 
             }
 
-            break
+            if total_score > best_total:
+                best = candidate
+                best_total = total_score
 
 
     if not best:
