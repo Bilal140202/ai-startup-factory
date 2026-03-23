@@ -21,6 +21,7 @@ from shared import ai, extract_json
 GH_TOKEN = os.environ["GITHUB_TOKEN"]
 GH_USER = os.environ["GITHUB_USERNAME"]
 NETLIFY_TOKEN = os.environ["NETLIFY_AUTH_TOKEN"]
+FACTORY_REPO = os.environ.get("FACTORY_REPO_NAME", "ai-startup-factory")
 
 WEEKLY_LIMIT = 5
 
@@ -300,6 +301,10 @@ def unique_repo_name(base_name):
     return f"{sanitize_repo_name(base_name)}-{ts}"
 
 
+def generated_app_url(safe_name):
+    return f"https://github.com/{GH_USER}/{FACTORY_REPO}/tree/main/generated/{safe_name}"
+
+
 def create_github_repo(name, description):
     safe_name = unique_repo_name(name)
     if safe_name != name:
@@ -313,9 +318,12 @@ def create_github_repo(name, description):
     )
 
     if response.status_code == 201:
-        return safe_name, f"https://github.com/{GH_USER}/{safe_name}"
+        return safe_name, f"https://github.com/{GH_USER}/{safe_name}", True
     if response.status_code == 422:
-        return safe_name, f"https://github.com/{GH_USER}/{safe_name}"
+        return safe_name, f"https://github.com/{GH_USER}/{safe_name}", True
+    if response.status_code in [401, 403]:
+        print("  External repo creation is not permitted for this token. Using factory repo storage instead.")
+        return safe_name, generated_app_url(safe_name), False
 
     raise RuntimeError(f"GitHub repo creation failed: {response.status_code} {response.text}")
 
@@ -415,8 +423,11 @@ def main():
         with open(os.path.join(tmp_dir, "README.md"), "w", encoding="utf-8") as f:
             f.write(f"# {name}\n\n{desc}\n\nBuilt by AI Startup Factory\n")
 
-        safe_name, gh_url = create_github_repo(name, desc)
-        push_to_github(tmp_dir, safe_name)
+        safe_name, gh_url, external_repo = create_github_repo(name, desc)
+
+        if external_repo:
+            push_to_github(tmp_dir, safe_name)
+
         netlify_url = netlify_deploy(tmp_dir, safe_name)
 
         dest = os.path.join("generated", safe_name)
