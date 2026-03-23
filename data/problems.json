@@ -1,1 +1,41 @@
-[]
+[
+  {
+    "title": "If you regularly dig through logs or trace issues across different sources, I'd love to know what your current process looks like, what tools you use, what work",
+    "idea": "Difficulty in tracing issues across multiple data sources and logs, leading to manual and time-consuming processes.",
+    "url": "https://news.ycombinator.com/item?id=47392245",
+    "score": 0,
+    "signal_score": 14,
+    "sub": "hn-comments",
+    "ai_score": 8,
+    "product_type": "react-app",
+    "product_name": "log-tracer",
+    "elevator_pitch": "Automate log tracing and issue resolution across multiple data sources, saving time and increasing efficiency.",
+    "target_user": "DevOps engineers, developers, and IT professionals who regularly work with logs and multiple data sources.",
+    "why_now": "The increasing complexity of modern software systems and the growing need for efficient issue resolution make this problem more pressing than ever.",
+    "github_refs": [
+      {
+        "repo_url": "https://github.com/freeCodeCamp/freeCodeCamp",
+        "full_name": "freeCodeCamp/freeCodeCamp",
+        "default_branch": "main",
+        "description": "freeCodeCamp.org's open-source codebase and curriculum. Learn math, programming, and computer science for free.",
+        "stars": 438740
+      },
+      {
+        "repo_url": "https://github.com/public-apis/public-apis",
+        "full_name": "public-apis/public-apis",
+        "default_branch": "master",
+        "description": "A collective list of free APIs",
+        "stars": 414675
+      },
+      {
+        "repo_url": "https://github.com/tensorflow/tensorflow",
+        "full_name": "tensorflow/tensorflow",
+        "default_branch": "master",
+        "description": "An Open Source Machine Learning Framework for Everyone",
+        "stars": 194328
+      }
+    ],
+    "status": "pending",
+    "created": "2026-03-23 07:22:21.159272"
+  }
+]
