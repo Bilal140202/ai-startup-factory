@@ -23,7 +23,10 @@ from shared import ai, extract_json
 GH_TOKEN = os.environ["GITHUB_TOKEN"]
 GH_USER  = os.environ["GITHUB_USERNAME"]
 
-HEADERS = {"User-Agent": "ai-startup-factory-liam/6.0"}
+HEADERS = {
+"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
+"Accept-Language": "en-US,en;q=0.9"
+}
 
 
 SUBREDDITS = [
@@ -72,6 +75,8 @@ TOOL_CONTEXT = [
 "convert","analyze","summarize","transcribe","integrate"
 ]
 
+REDDIT_POST_CACHE = None
+
 
 # ------------------------------------------------
 # File helpers
@@ -109,6 +114,34 @@ def set_state(s):
 def get_state():
 
     return load_one("data/pipeline_state.json","idle")
+
+def safe_get_json(url):
+
+    response = requests.get(
+    url,
+    headers={**HEADERS, "Accept": "application/json"},
+    timeout=20
+    )
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+def safe_get_html(url):
+
+    response = requests.get(
+    url,
+    headers={**HEADERS, "Accept": "text/html,application/xhtml+xml"},
+    timeout=20
+    )
+
+    response.raise_for_status()
+
+    if "<html" not in response.text.lower():
+        raise ValueError(f"Expected HTML page from {url}")
+
+    return response.text
 
 
 def clean_text(text):
@@ -309,11 +342,145 @@ def build_candidate(title, text, url, score, sub, source):
     }
 
 
+def extract_numeric_score(text):
+
+    match = re.search(r"(-?\d+)", clean_text(text))
+
+    if match:
+        return int(match.group(1))
+
+    return 0
+
+
+def parse_old_reddit_listing(html, sub):
+
+    soup = BeautifulSoup(html,"html.parser")
+    results = []
+
+    for row in soup.select(".thing"):
+
+        title_el = row.select_one("a.title")
+
+        if not title_el:
+            continue
+
+        title = clean_text(title_el.get_text(" ", strip=True))
+        score_text = row.select_one(".score.unvoted")
+        comments_el = row.select_one("a.comments")
+        comments_text = comments_el.get_text(" ", strip=True) if comments_el else ""
+        comment_count = extract_numeric_score(comments_text)
+        score = extract_numeric_score(score_text.get_text(" ", strip=True) if score_text else "")
+        permalink = comments_el.get("href","") if comments_el else row.get("data-permalink","")
+
+        if permalink.startswith("/"):
+            permalink = "https://old.reddit.com" + permalink
+
+        text_parts = [title]
+        tag_text = " ".join(el.get_text(" ", strip=True) for el in row.select(".expando .md p"))
+
+        if tag_text:
+            text_parts.append(tag_text)
+
+        results.append({
+        "title": title,
+        "text": clean_text(" ".join(text_parts)),
+        "url": permalink,
+        "score": score + comment_count,
+        "sub": sub,
+        "source": "reddit-post"
+        })
+
+    return results
+
+
+def parse_old_reddit_comments(html, limit=12):
+
+    soup = BeautifulSoup(html,"html.parser")
+    comments = []
+
+    for comment in soup.select(".comment"):
+
+        body_el = comment.select_one(".usertext-body .md")
+
+        if not body_el:
+            continue
+
+        text = clean_text(body_el.get_text(" ", strip=True))
+
+        if len(text) < 30:
+            continue
+
+        comments.append(text)
+
+        if len(comments) >= limit:
+            break
+
+    return comments
+
+
+def fetch_reddit_comment_candidates(posts, max_posts=8, max_comments_per_post=8):
+
+    ideas = []
+
+    for post in sorted(posts, key=lambda x: x["score"], reverse=True)[:max_posts]:
+
+        if not post.get("url"):
+            continue
+
+        try:
+
+            html = safe_get_html(post["url"])
+
+            for comment_text in parse_old_reddit_comments(html, limit=max_comments_per_post):
+
+                candidate = build_candidate(
+                comment_text[:160],
+                comment_text,
+                post["url"],
+                max(post["score"] // 3, 1),
+                post["sub"],
+                "reddit-comment"
+                )
+
+                if candidate:
+                    ideas.append(candidate)
+
+            time.sleep(1)
+
+        except Exception as e:
+
+            print("reddit comment page error:", e)
+
+    return ideas
+
+
+def fetch_hn_algolia_hits(tags, query=""):
+
+    url = (
+    "https://hn.algolia.com/api/v1/search_by_date?"
+    f"tags={tags}&query={requests.utils.quote(query)}&hitsPerPage=50"
+    )
+
+    try:
+
+        return safe_get_json(url).get("hits", [])
+
+    except Exception as e:
+
+        print("hn algolia error:", e)
+        return []
+
+
 # ------------------------------------------------
 # Reddit post scanning
 # ------------------------------------------------
 
 def scrape_reddit_posts():
+
+    global REDDIT_POST_CACHE
+
+    if REDDIT_POST_CACHE is not None:
+        return list(REDDIT_POST_CACHE)
 
     ideas = []
 
@@ -321,24 +488,19 @@ def scrape_reddit_posts():
 
         try:
 
-            url = f"https://www.reddit.com/r/{sub}/top.json?t=week&limit=50"
+            url = f"https://old.reddit.com/r/{sub}/top/?sort=top&t=week"
+            html = safe_get_html(url)
+            posts = parse_old_reddit_listing(html, sub)
 
-            r = requests.get(url,headers=HEADERS)
+            for post in posts[:25]:
 
-            posts = r.json()["data"]["children"]
-
-            for p in posts:
-
-                d = p["data"]
-
-                text = d["title"] + " " + (d.get("selftext") or "")
                 candidate = build_candidate(
-                d["title"],
-                text,
-                "https://reddit.com"+d["permalink"],
-                d["ups"] + d["num_comments"],
-                sub,
-                "reddit-post"
+                post["title"],
+                post["text"],
+                post["url"],
+                post["score"],
+                post["sub"],
+                post["source"]
                 )
 
                 if candidate:
@@ -350,6 +512,8 @@ def scrape_reddit_posts():
 
             print("reddit post error:",e)
 
+    REDDIT_POST_CACHE = list(ideas)
+
     return ideas
 
 
@@ -359,38 +523,8 @@ def scrape_reddit_posts():
 
 def scrape_reddit_comments():
 
-    ideas = []
-
-    try:
-
-        url = "https://www.reddit.com/r/all/comments.json?limit=200"
-
-        r = requests.get(url,headers=HEADERS)
-
-        comments = r.json()["data"]["children"]
-
-        for c in comments:
-
-            d = c["data"]
-
-            text = d["body"]
-            candidate = build_candidate(
-            text[:160],
-            text,
-            "https://reddit.com"+d["permalink"],
-            d["score"],
-            d["subreddit"],
-            "reddit-comment"
-            )
-
-            if candidate:
-                ideas.append(candidate)
-
-    except Exception as e:
-
-        print("reddit comment error:",e)
-
-    return ideas
+    posts = scrape_reddit_posts()
+    return fetch_reddit_comment_candidates(posts)
 
 
 # ------------------------------------------------
@@ -435,6 +569,47 @@ def scrape_hackernews():
     except Exception as e:
 
         print("hn error:",e)
+
+    for hit in fetch_hn_algolia_hits("story,ask_hn"):
+
+        title = clean_text(hit.get("title") or hit.get("story_title") or "")
+        text = clean_text(BeautifulSoup(hit.get("story_text") or "", "html.parser").get_text(" ", strip=True))
+
+        if not title:
+            continue
+
+        candidate = build_candidate(
+        title,
+        text,
+        hit.get("url") or hit.get("story_url") or f"https://news.ycombinator.com/item?id={hit.get('objectID','')}",
+        int(hit.get("points") or 0) + int(hit.get("num_comments") or 0),
+        "ask-hn",
+        "hackernews"
+        )
+
+        if candidate:
+            ideas.append(candidate)
+
+    for keyword in ["need tool", "manual process", "would pay", "feature request", "how do you automate"]:
+
+        for hit in fetch_hn_algolia_hits("comment", keyword):
+
+            comment_text = clean_text(BeautifulSoup(hit.get("comment_text") or "", "html.parser").get_text(" ", strip=True))
+
+            if not comment_text:
+                continue
+
+            candidate = build_candidate(
+            comment_text[:160],
+            comment_text,
+            hit.get("story_url") or f"https://news.ycombinator.com/item?id={hit.get('story_id','')}",
+            int(hit.get("points") or 0),
+            "hn-comments",
+            "hackernews-comment"
+            )
+
+            if candidate:
+                ideas.append(candidate)
 
     return ideas
 
